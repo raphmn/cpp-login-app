@@ -1,11 +1,9 @@
 #include <iostream>
 #include <bcrypt.h>
 std::string hashpassword(const std::string& password) {
-    char salt[BCRYPT_HASHSIZE];
-    char hash [BCRYPT_HASHSIZE];
-    bcrypt_gensalt(12,salt);
-    bcrypt_hashpw(password.c_str(),salt,hash);
-    return std::string(hash);
+    return bcrypt::generateHash(password);
+}
+
 
 int main() {
     std::string password;
