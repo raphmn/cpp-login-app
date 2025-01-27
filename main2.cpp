@@ -3,28 +3,31 @@
 #include <unordered_map>
 #include <string>
 #include <opencv2/opencv.hpp>
+#include <cstdio> // Pour std::remove
 #include "bcrypt.h"
 #include "qrcodegen.h"
 #include <opencv2/highgui.hpp> // Inclure pour cv::imshow
 #include <opencv2/imgcodecs.hpp> // Inclure pour cv::imread
 
 // Fonction pour hacher un mot de passe
-std::string hashPassword(const std::string& password) {
+std::string hashPassword(const std::string &password) {
     return bcrypt::generateHash(password);
 }
 
 // Fonction pour vérifier un mot de passe
-bool verifyPassword(const std::string& password, const std::string& hashedPassword) {
+bool verifyPassword(const std::string &password, const std::string &hashedPassword) {
     return bcrypt::validatePassword(password, hashedPassword);
 }
 
-// Fonction pour générer et afficher un QR code
-void generateAndShowQRCode(const std::string& data, const std::string& filename) {
+// Fonction pour générer et afficher un QR code sécurisé basé sur le nom d'utilisateur et le mot de passe haché
+void generateAndShowQRCode(const std::string &username, const std::string &hashedPassword, const std::string &filename) {
+    std::string qrData = username + "|" + hashedPassword;
+
     uint8_t tempBuffer[qrcodegen_BUFFER_LEN_MAX];
     uint8_t qrcode[qrcodegen_BUFFER_LEN_MAX];
 
-    // Générer le QR code avec les données fournies
-    bool success = qrcodegen_encodeText(data.c_str(), tempBuffer, qrcode, qrcodegen_Ecc_LOW,
+    // Générer le QR code avec les données combinées
+    bool success = qrcodegen_encodeText(qrData.c_str(), tempBuffer, qrcode, qrcodegen_Ecc_LOW,
                                         qrcodegen_VERSION_MIN, qrcodegen_VERSION_MAX, qrcodegen_Mask_AUTO, true);
     if (!success) {
         std::cerr << "Erreur : Impossible de générer le QR code.\n";
@@ -52,24 +55,68 @@ void generateAndShowQRCode(const std::string& data, const std::string& filename)
     cv::imwrite(filename, qrImage);
     cv::waitKey(0);
     cv::destroyAllWindows();
+
+    // Supprimer le fichier .png après affichage
+    if (std::remove(filename.c_str()) == 0) {
+        std::cout << "Fichier " << filename << " supprimé avec succès.\n";
+    } else {
+        std::cerr << "Erreur : Impossible de supprimer le fichier " << filename << ".\n";
+    }
+}
+
+// Fonction pour scanner et valider un QR code
+bool scanAndValidateQRCode(const std::string &expectedData) {
+    cv::VideoCapture camera(0);
+    if (!camera.isOpened()) {
+        std::cerr << "Impossible d'ouvrir la caméra.\n";
+        return false;
+    }
+
+    cv::Mat frame;
+    cv::QRCodeDetector detector;
+    while (true) {
+        camera >> frame;
+        std::string qrData = detector.detectAndDecode(frame);
+
+        if (!qrData.empty()) {
+            if (qrData == expectedData) {
+                std::cout << "QR code validé.\n";
+                camera.release();
+                cv::destroyAllWindows();
+                return true;
+            } else {
+                std::cerr << "QR code incorrect : accès refusé.\n";
+                camera.release();
+                cv::destroyAllWindows();
+                return false;
+            }
+        }
+
+        cv::imshow("Scanner QR Code", frame);
+        if (cv::waitKey(15) >= 0) break;
+    }
+
+    camera.release();
+    cv::destroyAllWindows();
+    return false;
 }
 
 // Fonction pour sauvegarder les utilisateurs dans un fichier
-void saveUsers(const std::unordered_map<std::string, std::string>& users, const std::string& filename) {
+void saveUsers(const std::unordered_map<std::string, std::string> &users, const std::string &filename) {
     std::ofstream file(filename);
     if (!file.is_open()) {
         std::cerr << "Erreur : Impossible d'ouvrir le fichier pour sauvegarder les utilisateurs.\n";
         return;
     }
 
-    for (const auto& [username, hashedPassword] : users) {
+    for (const auto &[username, hashedPassword]: users) {
         file << username << " " << hashedPassword << "\n";
     }
     file.close();
 }
 
 // Fonction pour charger les utilisateurs depuis un fichier
-void loadUsers(std::unordered_map<std::string, std::string>& users, const std::string& filename) {
+void loadUsers(std::unordered_map<std::string, std::string> &users, const std::string &filename) {
     std::ifstream file(filename);
     if (!file.is_open()) {
         std::cerr << "Erreur : Impossible d'ouvrir le fichier pour charger les utilisateurs.\n";
@@ -83,57 +130,8 @@ void loadUsers(std::unordered_map<std::string, std::string>& users, const std::s
     file.close();
 }
 
-// Fonction pour scanner et valider un QR code
-bool scanQRCode(const std::string& expectedData) {
-    cv::VideoCapture camera(0);
-    if (!camera.isOpened()) {
-        std::cerr << "Impossible d'ouvrir la caméra.\n";
-        return false;
-    }
-
-    cv::Mat frame;
-    cv::QRCodeDetector detector;
-    while (true) {
-        camera >> frame;
-        std::string data = detector.detectAndDecode(frame);
-
-        if (!data.empty()) {
-            if (data == expectedData) {
-                std::cout << "QR code validé : " << data << "\n";
-
-                // Libération de la caméra avant d'afficher l'image
-                camera.release();
-                cv::destroyAllWindows();
-
-                // Afficher l'image "pregnant.png"
-                std::string filePath = "C:/Users/corth/CLionProjects/project/secret/pregnant.png";
-                cv::Mat image = cv::imread(filePath);
-
-                if (image.empty()) {
-                    std::cerr << "Erreur : Impossible de charger l'image : " << filePath << "\n";
-                    return false;
-                } else {
-                    cv::imshow("Succès - Image Secrète", image);
-                    cv::waitKey(0); // Attente que l'utilisateur ferme la fenêtre
-                    cv::destroyAllWindows();
-                    return true;
-                }
-            } else {
-                std::cerr << "QR code incorrect : " << data << "\n";
-            }
-        }
-
-        cv::imshow("Scanner QR Code", frame);
-        if (cv::waitKey(15) >= 0) break;
-    }
-
-    camera.release();
-    cv::destroyAllWindows();
-    return false;
-}
-
 // Fonction pour enregistrer un utilisateur
-void registerUser(std::unordered_map<std::string, std::string>& users, const std::string& dbFilename) {
+void registerUser(std::unordered_map<std::string, std::string> &users, const std::string &dbFilename) {
     std::string username, password;
     std::cout << "Entrez un nom d'utilisateur : ";
     std::cin >> username;
@@ -151,16 +149,16 @@ void registerUser(std::unordered_map<std::string, std::string>& users, const std
 
     // Chemin d'accès au QR code
     std::string qrCodeFilename = "C:/Users/corth/CLionProjects/project/qrcodeuser/" + username + "_qrcode.png";
-    generateAndShowQRCode(username, qrCodeFilename);
+    generateAndShowQRCode(username, hashedPassword, qrCodeFilename);
 
     // Sauvegarder les utilisateurs dans le fichier
     saveUsers(users, dbFilename);
 
-    std::cout << "Utilisateur enregistré avec succès ! QR code généré et sauvegardé.\n";
+    std::cout << "Utilisateur enregistré avec succès ! QR code sécurisé généré, affiché et supprimé.\n";
 }
 
 // Fonction pour se connecter
-void loginUser(const std::unordered_map<std::string, std::string>& users) {
+void loginUser(const std::unordered_map<std::string, std::string> &users) {
     std::string username, password;
     std::cout << "Entrez votre nom d'utilisateur : ";
     std::cin >> username;
@@ -179,9 +177,11 @@ void loginUser(const std::unordered_map<std::string, std::string>& users) {
         return;
     }
 
+    // Validation du QR code
+    std::string expectedQRData = username + "|" + it->second;
     std::cout << "Veuillez scanner votre QR code pour la double authentification...\n";
-    if (!scanQRCode(username)) {
-        std::cout << "Échec de l'authentification QR code.\n";
+    if (!scanAndValidateQRCode(expectedQRData)) {
+        std::cout << "Échec de l'authentification QR code. Accès refusé.\n";
         return;
     }
 
